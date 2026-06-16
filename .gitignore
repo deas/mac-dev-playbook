@@ -3,8 +3,8 @@
 .ansible
 *.retry
 roles*
-.env
+#.env
 config.yml
 scratch
 *-key.json
-
+svc/hermes-agent/secret.env

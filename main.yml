@@ -45,6 +45,9 @@
     - import_tasks: tasks/services.yml
       tags: ["extra-packages"]
 
+    - import_tasks: tasks/colima.yml
+      tags: ["colima"]
+
     - import_tasks: tasks/whisper-cpp.yml
       tags: ["whisper-cpp"]
 

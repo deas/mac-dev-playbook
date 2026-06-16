@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.colima.{{ colima_target_user }}</string>
+    <key>UserName</key>
+    <string>{{ colima_target_user }}</string>
+    <key>GroupName</key>
+    <string>staff</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>{{ colima_target_user_home }}</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOMEBREW_NO_ENV_HINTS</key>
+        <string>1</string>
+    </dict>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/opt/colima/bin/colima</string>
+        <string>start</string>
+        <string>-f</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>{{ colima_target_user_home }}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/opt/homebrew/var/log/colima.log</string>
+    <key>StandardErrorPath</key>
+    <string>/opt/homebrew/var/log/colima.log</string>
+</dict>
+</plist>

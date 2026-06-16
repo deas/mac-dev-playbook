@@ -1,0 +1,144 @@
+---
+- name: Configure Colima and Docker CLI plugins
+  become: true
+  become_user: "{{ colima_target_user }}"
+  block:
+    - name: Ensure ~/.docker/cli-plugins directory exists
+      ansible.builtin.file:
+        path: "{{ colima_target_user_home }}/.docker/cli-plugins"
+        state: directory
+        mode: "0755"
+
+    - name: Symlink docker-compose and docker-buildx into the Docker CLI plugins directory
+      ansible.builtin.file:
+        src: "/opt/homebrew/opt/{{ item }}/bin/{{ item }}"
+        dest: "{{ colima_target_user_home }}/.docker/cli-plugins/{{ item }}"
+        state: link
+        force: true
+      loop:
+        - docker-compose
+        - docker-buildx
+
+    - name: Bootstrap the Colima default profile if it has never been started
+      ansible.builtin.command: >-
+        colima start
+        --memory {{ colima_memory_gib }}
+        --runtime docker
+        --vm-type {{ colima_vm_type }}
+        --mount-type {{ colima_mount_type }}
+      args:
+        creates: "{{ colima_target_user_home }}/.colima/default/colima.yaml"
+      environment:
+        HOMEBREW_NO_ENV_HINTS: "1"
+
+    - name: Ensure Colima default profile settings match the configured values
+      ansible.builtin.lineinfile:
+        path: "{{ colima_target_user_home }}/.colima/default/colima.yaml"
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: "^memory:", line: "memory: {{ colima_memory_gib }}" }
+        - { regexp: "^vmType:", line: "vmType: {{ colima_vm_type }}" }
+        - { regexp: "^mountType:", line: "mountType: {{ colima_mount_type }}" }
+      register: colima_profile_config
+
+    - name: Manage Colima extra host mounts in colima.yaml
+      ansible.builtin.shell:
+        cmd: |
+          python3 - << 'EOF'
+          import re, json, os, sys
+
+          config_path = os.environ['COLIMA_CONFIG']
+          mounts = json.loads(os.environ['COLIMA_MOUNTS'])
+
+          with open(config_path) as f:
+              content = f.read()
+
+          if mounts:
+              lines = ["mounts:"]
+              for m in mounts:
+                  lines.append(f"  - location: {m['location']}")
+                  lines.append(f"    writable: {'true' if m['writable'] else 'false'}")
+              new_block = "\n".join(lines)
+          else:
+              new_block = "mounts: []"
+
+          new_content = re.sub(
+              r'^mounts:(?:.*\n(?:[ \t]+.*\n)*)?',
+              new_block + "\n",
+              content,
+              count=1,
+              flags=re.MULTILINE,
+          )
+
+          if new_content != content:
+              with open(config_path, "w") as f:
+                  f.write(new_content)
+              print("changed")
+          EOF
+      environment:
+        COLIMA_CONFIG: "{{ colima_target_user_home }}/.colima/default/colima.yaml"
+        COLIMA_MOUNTS: "{{ colima_extra_mounts | to_json }}"
+      register: colima_mounts_config
+      changed_when: "'changed' in colima_mounts_config.stdout"
+
+    - name: Disable the per-user brew-services Colima LaunchAgent (superseded by system LaunchDaemon)
+      ansible.builtin.command: /opt/homebrew/bin/brew services stop colima
+      register: colima_brew_stop
+      failed_when: false
+      changed_when: "'Stopping' in colima_brew_stop.stdout or 'unloaded' in colima_brew_stop.stdout"
+      environment:
+        HOMEBREW_SERVICES_NO_DOMAIN_WARNING: "1"
+        HOMEBREW_NO_ENV_HINTS: "1"
+
+    - name: Remove the brew-services Colima LaunchAgent plist if present
+      ansible.builtin.file:
+        path: "{{ colima_target_user_home }}/Library/LaunchAgents/homebrew.mxcl.colima.plist"
+        state: absent
+
+- name: Install Colima system LaunchDaemon (starts the VM at boot, before login)
+  become: true
+  block:
+    - name: Render /Library/LaunchDaemons/com.colima.{{ colima_target_user }}.plist
+      ansible.builtin.template:
+        src: colima-launchd.plist.j2
+        dest: "/Library/LaunchDaemons/com.colima.{{ colima_target_user }}.plist"
+        owner: root
+        group: wheel
+        mode: "0644"
+      register: colima_daemon_plist
+
+    - name: Ensure the Colima log file exists and is writable by {{ colima_target_user }}
+      ansible.builtin.file:
+        path: /opt/homebrew/var/log/colima.log
+        state: touch
+        owner: "{{ colima_target_user }}"
+        group: staff
+        mode: "0644"
+      changed_when: false
+
+    - name: Probe whether the Colima LaunchDaemon is already loaded
+      ansible.builtin.command: >-
+        launchctl print system/com.colima.{{ colima_target_user }}
+      register: colima_daemon_print
+      changed_when: false
+      failed_when: false
+
+    - name: Bootout the Colima LaunchDaemon when plist or profile changed
+      ansible.builtin.command: >-
+        launchctl bootout system/com.colima.{{ colima_target_user }}
+      changed_when: true
+      when:
+        - colima_daemon_print.rc == 0
+        - colima_daemon_plist.changed or colima_profile_config.changed or colima_mounts_config.changed
+
+    - name: Bootstrap the Colima LaunchDaemon into the system domain
+      ansible.builtin.command: >-
+        launchctl bootstrap system
+        /Library/LaunchDaemons/com.colima.{{ colima_target_user }}.plist
+      changed_when: true
+      when: >-
+        colima_daemon_print.rc != 0
+        or colima_daemon_plist.changed
+        or colima_profile_config.changed
+        or colima_mounts_config.changed

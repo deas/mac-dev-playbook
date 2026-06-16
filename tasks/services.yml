@@ -43,6 +43,7 @@
   register: tailscale_status
   changed_when: false
   failed_when: false
+  timeout: 15
 
 - name: Print Tailscale login URL if not authenticated
   debug:

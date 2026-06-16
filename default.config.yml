@@ -37,7 +37,11 @@ homebrew_installed_packages:
   # - ansible # Installed via Pip.
   - autoconf
   - bash-completion
+  - colima
   - direnv
+  - docker
+  - docker-buildx
+  - docker-compose
   - gettext
   - git
   - gh
@@ -75,6 +79,20 @@ homebrew_uninstalled_packages:
   - doxygen
   - gifsicle
 
+homebrew_cask_uninstalled_apps:
+  - docker
+
+# Colima (Docker daemon VM) configuration.
+colima_target_user: apfelmus
+colima_target_user_home: "/Users/{{ colima_target_user }}"
+colima_memory_gib: 4
+# vz + virtiofs gives near-native bind-mount perf on Apple Silicon (macOS 13+).
+colima_vm_type: vz
+colima_mount_type: virtiofs
+colima_extra_mounts:
+  - location: "{{ colima_target_user_home }}"
+    writable: true
+
 homebrew_taps: []
 
 homebrew_cask_appdir: /Applications
@@ -86,7 +104,7 @@ homebrew_cask_apps: # []
   - gcloud-cli
   - obsidian
   # - chromedriver
-  - docker
+  # - docker  # Replaced by colima + docker CLI formulae.
   # - dropbox
   # - firefox
   # - google-chrome
