@@ -37,6 +37,7 @@ homebrew_installed_packages:
   # - ansible # Installed via Pip.
   - autoconf
   - bash-completion
+  - bats-core
   - colima
   - direnv
   - docker
@@ -69,6 +70,8 @@ homebrew_installed_packages:
   - openssl
   - opencode
   - pv
+  - shellcheck
+  - shfmt
   - uv
   - wget
   - whisper-cpp
@@ -81,6 +84,7 @@ homebrew_uninstalled_packages:
 
 homebrew_cask_uninstalled_apps:
   - docker
+  - claude-code
 
 # Colima (Docker daemon VM) configuration.
 colima_target_user: apfelmus
@@ -100,7 +104,6 @@ homebrew_cask_apps: # []
   # - tailscale
   - ghostty
   - lm-studio
-  - claude-code
   - gcloud-cli
   - obsidian
   # - chromedriver
@@ -133,7 +136,9 @@ gem_packages: []
 # - name: bundler
 #   state: present # present/absent/latest, default: present
 #   version: "~> 1.15.1" # default: N/A
-npm_packages: []
+npm_packages:
+  - "@anthropic-ai/claude-code"
+  - "agent-skill-manager"
 #  - googleworkspace/cli
 # - name: webpack
 #   state: present # present/absent/latest, default: present
