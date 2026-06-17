@@ -49,6 +49,7 @@ homebrew_installed_packages:
   - tea
   - fish
   #  - go
+  - glow
   - gnupg
   - httpie
   - iperf
