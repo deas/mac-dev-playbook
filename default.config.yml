@@ -40,6 +40,7 @@ homebrew_installed_packages:
   - bats-core
   - colima
   - direnv
+  - ffmpeg
   - docker
   - docker-buildx
   - docker-compose
