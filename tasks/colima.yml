@@ -19,6 +19,13 @@
         - docker-compose
         - docker-buildx
 
+    - name: Install the self-healing Colima supervisor script
+      ansible.builtin.copy:
+        src: bin/colima-supervisor
+        dest: "{{ colima_supervisor_path }}"
+        mode: "0755"
+      register: colima_supervisor_script
+
     - name: Bootstrap the Colima default profile if it has never been started
       ansible.builtin.command: >-
         colima start
@@ -130,7 +137,9 @@
       changed_when: true
       when:
         - colima_daemon_print.rc == 0
-        - colima_daemon_plist.changed or colima_profile_config.changed or colima_mounts_config.changed
+        - >-
+          colima_daemon_plist.changed or colima_profile_config.changed
+          or colima_mounts_config.changed or colima_supervisor_script.changed
 
     - name: Bootstrap the Colima LaunchDaemon into the system domain
       ansible.builtin.command: >-
@@ -142,3 +151,4 @@
         or colima_daemon_plist.changed
         or colima_profile_config.changed
         or colima_mounts_config.changed
+        or colima_supervisor_script.changed

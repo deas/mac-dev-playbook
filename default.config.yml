@@ -98,6 +98,8 @@ colima_mount_type: virtiofs
 colima_extra_mounts:
   - location: "{{ colima_target_user_home }}"
     writable: true
+# Self-healing supervisor invoked by the LaunchDaemon (see bin/colima-supervisor).
+colima_supervisor_path: "{{ colima_target_user_home }}/.colima/colima-supervisor"
 
 homebrew_taps: []
 

@@ -1,0 +1,35 @@
+#!/bin/bash
+#
+# colima-supervisor -- keep the Colima VM running and self-heal stale Lima state.
+#
+# Runs under the com.colima.<user> LaunchDaemon. After an unclean shutdown the
+# Lima instance can be left "Broken" with stale ha.sock/*.pid files, which makes
+# `colima start` fail. Without healing, launchd's KeepAlive then crash-loops the
+# job. This loop force-clears that stale state before starting, and only ever
+# acts when the VM is actually down, so a healthy VM is never disturbed.
+
+set -uo pipefail
+
+export LIMA_HOME="${HOME}/.colima/_lima"
+
+readonly PROFILE="colima"
+readonly CHECK_INTERVAL="${COLIMA_SUPERVISOR_INTERVAL:-30}"
+
+log() {
+  printf '%s colima-supervisor: %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*"
+}
+
+log "supervisor started (interval=${CHECK_INTERVAL}s, LIMA_HOME=${LIMA_HOME})"
+
+while true; do
+  if ! colima status >/dev/null 2>&1; then
+    log "Colima is not running; clearing any stale Lima state before starting"
+    limactl stop -f "${PROFILE}" >/dev/null 2>&1 || true
+    if colima start -f; then
+      log "Colima started"
+    else
+      log "colima start failed; retrying in ${CHECK_INTERVAL}s"
+    fi
+  fi
+  sleep "${CHECK_INTERVAL}"
+done
