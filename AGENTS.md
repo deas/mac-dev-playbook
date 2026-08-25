@@ -32,6 +32,11 @@ The main development workflow entrypoints are provided by the `Makefile` and inc
 
 The default `help` target provides help for all provided tasks.
 
+The `justfile` is a separate, narrower entrypoint: day-to-day operations on host
+services that Ansible provisions but does not converge on demand (e.g.
+`just hermes-update`). `just --list` shows the recipes. Anything to do with
+linting, testing or provisioning belongs in the `Makefile`, not here.
+
 Before submitting any changes, it is crucial to validate them running:
 
 ```bash
