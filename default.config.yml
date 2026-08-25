@@ -102,6 +102,39 @@ colima_extra_mounts:
 # Self-healing supervisor invoked by the LaunchDaemon (see bin/colima-supervisor).
 colima_supervisor_path: "{{ colima_target_user_home }}/.colima/colima-supervisor"
 
+# Hermes agent (host service) configuration.
+hermes_enabled: true
+hermes_target_user: apfelmus
+hermes_target_user_home: "/Users/{{ hermes_target_user }}"
+# Kept from the container deployment so no state migration is needed.
+hermes_home: "{{ hermes_target_user_home }}/hermes-docker-daten"
+hermes_bin: "{{ hermes_target_user_home }}/.local/bin/hermes"
+# Deliberately not ai.hermes.gateway -- hermes rewrites and boots out that label itself.
+hermes_launchd_label: de.contentreich.hermes-gateway
+hermes_log_dir: "{{ hermes_home }}/logs"
+# Non-secret runtime config, carried over from the container's app.env. Secrets stay
+# in {{ hermes_home }}/.env, which hermes reads and rewrites itself.
+# API_SERVER_HOST only defaulted to 0.0.0.0 inside the container; natively it
+# defaults to loopback, so it is set explicitly here.
+# The dashboard is deliberately not run: it is an optional management UI that
+# nothing else depends on, and it needs its own process (`hermes dashboard`) --
+# `gateway run` never started it. The container's HERMES_DASHBOARD* keys are
+# therefore dropped rather than carried over.
+hermes_environment:
+  HERMES_HOME: "{{ hermes_home }}"
+  API_SERVER_HOST: "0.0.0.0"
+  API_SERVER_PORT: "8642"
+  HERMES_MAX_ITERATIONS: "90"
+  BROWSER_INACTIVITY_TIMEOUT: "120"
+  BROWSER_SESSION_TIMEOUT: "300"
+  BROWSERBASE_ADVANCED_STEALTH: "false"
+  BROWSERBASE_PROXIES: "true"
+  EMAIL_POLL_INTERVAL: "15"
+  EMAIL_SMTP_HOST: "smtp.gmail.com"
+  EMAIL_SMTP_PORT: "587"
+  TERMINAL_LIFETIME_SECONDS: "300"
+  TERMINAL_TIMEOUT: "60"
+
 homebrew_taps: []
 
 homebrew_cask_appdir: /Applications

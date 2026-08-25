@@ -1,0 +1,105 @@
+---
+# Hermes gateway as a user-scoped LaunchAgent, replacing the Docker container that
+# used to run it inside the Colima VM.
+#
+# The gateway is deliberately NOT registered under hermes' own `ai.hermes.gateway`
+# label: hermes rewrites and boots out that label itself (upstream #43842, #69098),
+# and `hermes gateway install` resets HERMES_HOME back to ~/.hermes (#32741), which
+# on this host is a different state tree. launchd runs `gateway run` in the
+# foreground so it is the supervisor -- never `hermes gateway start`, which degrades
+# to an unsupervised detached process on launchctl exit 5 (#11323, #42524).
+
+- name: Configure the Hermes gateway host service
+  become: true
+  become_user: "{{ hermes_target_user }}"
+  environment:
+    HOME: "{{ hermes_target_user_home }}"
+  block:
+    - name: Resolve the uid of {{ hermes_target_user }}
+      ansible.builtin.command: id -u {{ hermes_target_user }}
+      register: hermes_uid
+      changed_when: false
+      check_mode: false
+
+    - name: Install Hermes if it is not present
+      ansible.builtin.shell:
+        cmd: curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+        creates: "{{ hermes_bin }}"
+
+    # 0700, not 0755: hermes already keeps this at 0700 and agent logs carry
+    # conversation content.
+    - name: Ensure the Hermes log directory exists
+      ansible.builtin.file:
+        path: "{{ hermes_log_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Bootout the hermes-managed LaunchAgent if it is loaded
+      ansible.builtin.command: >-
+        launchctl bootout gui/{{ hermes_uid.stdout }}/ai.hermes.gateway
+      register: hermes_own_agent_bootout
+      failed_when: false
+      changed_when: hermes_own_agent_bootout.rc == 0
+
+    - name: Remove the hermes-managed LaunchAgent plist if present
+      ansible.builtin.file:
+        path: "{{ hermes_target_user_home }}/Library/LaunchAgents/ai.hermes.gateway.plist"
+        state: absent
+
+    - name: Ensure the LaunchAgents directory exists
+      ansible.builtin.file:
+        path: "{{ hermes_target_user_home }}/Library/LaunchAgents"
+        state: directory
+        mode: "0755"
+
+    - name: Render the Hermes gateway LaunchAgent plist
+      ansible.builtin.template:
+        src: hermes-gateway.plist.j2
+        dest: "{{ hermes_target_user_home }}/Library/LaunchAgents/{{ hermes_launchd_label }}.plist"
+        mode: "0644"
+      register: hermes_agent_plist
+
+    - name: Probe whether the Hermes gateway LaunchAgent is already loaded
+      ansible.builtin.command: >-
+        launchctl print gui/{{ hermes_uid.stdout }}/{{ hermes_launchd_label }}
+      register: hermes_agent_print
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Decide whether the Hermes gateway LaunchAgent needs reloading
+      ansible.builtin.set_fact:
+        hermes_needs_bootout: "{{ hermes_agent_print.rc == 0 and hermes_agent_plist.changed }}"
+        hermes_needs_bootstrap: "{{ hermes_agent_print.rc != 0 or hermes_agent_plist.changed }}"
+
+    - name: Bootout the Hermes gateway LaunchAgent when the plist changed
+      ansible.builtin.command: >-
+        launchctl bootout gui/{{ hermes_uid.stdout }}/{{ hermes_launchd_label }}
+      changed_when: true
+      when: hermes_needs_bootout
+
+    # launchd tears the job down asynchronously. Bootstrapping while the label is
+    # still leaving the domain returns "Bootstrap failed: 5: Input/output error"
+    # -- the same exit 5 hermes itself treats as "launchd unsupported" before
+    # silently detaching (upstream #11323, #42524). Wait it out instead.
+    - name: Wait for the Hermes gateway label to leave the GUI domain
+      ansible.builtin.command: >-
+        launchctl print gui/{{ hermes_uid.stdout }}/{{ hermes_launchd_label }}
+      register: hermes_bootout_wait
+      until: hermes_bootout_wait.rc != 0
+      retries: 10
+      delay: 2
+      changed_when: false
+      failed_when: false
+      when: hermes_needs_bootout
+
+    - name: Bootstrap the Hermes gateway LaunchAgent into the user's GUI domain
+      ansible.builtin.command: >-
+        launchctl bootstrap gui/{{ hermes_uid.stdout }}
+        {{ hermes_target_user_home }}/Library/LaunchAgents/{{ hermes_launchd_label }}.plist
+      register: hermes_bootstrap
+      until: hermes_bootstrap.rc == 0
+      retries: 5
+      delay: 3
+      changed_when: hermes_bootstrap.rc == 0
+      when: hermes_needs_bootstrap

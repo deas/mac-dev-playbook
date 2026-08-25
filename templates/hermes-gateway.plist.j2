@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ hermes_launchd_label }}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>{{ hermes_target_user_home }}</string>
+        <key>PATH</key>
+        <string>{{ hermes_target_user_home }}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+{% for key, value in hermes_environment | dictsort %}
+        <key>{{ key }}</key>
+        <string>{{ value }}</string>
+{%- endfor %}
+    </dict>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ hermes_bin }}</string>
+        <string>gateway</string>
+        <string>run</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>{{ hermes_home }}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- Plain true, not KeepAlive{SuccessfulExit:false}: a graceful gateway restart exits 0,
+         which the dict form reads as "do not relaunch" (upstream #28135). -->
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>StandardOutPath</key>
+    <string>{{ hermes_log_dir }}/gateway.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ hermes_log_dir }}/gateway.error.log</string>
+</dict>
+</plist>

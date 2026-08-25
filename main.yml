@@ -51,6 +51,10 @@
     - import_tasks: tasks/whisper-cpp.yml
       tags: ["whisper-cpp"]
 
+    - import_tasks: tasks/hermes.yml
+      when: hermes_enabled
+      tags: ["hermes"]
+
     - name: Run post-provision task files in a block.
       tags: ["post"]
       block:
