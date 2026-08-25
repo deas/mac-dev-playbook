@@ -12,7 +12,7 @@ services:
       - "${DASHBOARD_PORT:-9119}:9119"
     volumes:
       - "${DATA_DIR:-./data}:/opt/data"
-      # - "${PROJECTS_ROOT:-./data}:/opt/data/projects"
+      - "${PROJECTS_ROOT:-./projects}:/opt/projekte"
       # - "./data/SOUL.md:/opt/data/SOUL.yaml" # TODO: Should probably be covered by data folder once we feel confident with kopia
       # - "./data/config.yaml:/opt/data/config.yaml"
       # - "./entrypoint.sh:/opt/hermes/docker/entrypoint.sh"
