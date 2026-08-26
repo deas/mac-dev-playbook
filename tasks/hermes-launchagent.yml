@@ -1,0 +1,57 @@
+---
+# Converge one Hermes LaunchAgent: render its plist, then bounce the job through
+# gui/<uid> only when the rendered plist actually changed. Included once per agent
+# from tasks/hermes.yml, which supplies hermes_agent (.label, .template) and has
+# already registered hermes_uid.
+
+- name: Render the LaunchAgent plist for {{ hermes_agent.label }}
+  ansible.builtin.template:
+    src: "{{ hermes_agent.template }}"
+    dest: "{{ hermes_target_user_home }}/Library/LaunchAgents/{{ hermes_agent.label }}.plist"
+    mode: "0644"
+  register: hermes_agent_plist
+
+- name: Probe whether launchd already loaded {{ hermes_agent.label }}
+  ansible.builtin.command: >-
+    launchctl print gui/{{ hermes_uid.stdout }}/{{ hermes_agent.label }}
+  register: hermes_agent_print
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Decide whether launchd needs to reload {{ hermes_agent.label }}
+  ansible.builtin.set_fact:
+    hermes_needs_bootout: "{{ hermes_agent_print.rc == 0 and hermes_agent_plist.changed }}"
+    hermes_needs_bootstrap: "{{ hermes_agent_print.rc != 0 or hermes_agent_plist.changed }}"
+
+- name: Bootout {{ hermes_agent.label }} when its plist changed
+  ansible.builtin.command: >-
+    launchctl bootout gui/{{ hermes_uid.stdout }}/{{ hermes_agent.label }}
+  changed_when: true
+  when: hermes_needs_bootout
+
+# launchd tears the job down asynchronously. Bootstrapping while the label is
+# still leaving the domain returns "Bootstrap failed: 5: Input/output error"
+# -- the same exit 5 hermes itself treats as "launchd unsupported" before
+# silently detaching (upstream #11323, #42524). Wait it out instead.
+- name: Wait for the GUI domain to release {{ hermes_agent.label }}
+  ansible.builtin.command: >-
+    launchctl print gui/{{ hermes_uid.stdout }}/{{ hermes_agent.label }}
+  register: hermes_bootout_wait
+  until: hermes_bootout_wait.rc != 0
+  retries: 10
+  delay: 2
+  changed_when: false
+  failed_when: false
+  when: hermes_needs_bootout
+
+- name: Bootstrap into the user's GUI domain {{ hermes_agent.label }}
+  ansible.builtin.command: >-
+    launchctl bootstrap gui/{{ hermes_uid.stdout }}
+    {{ hermes_target_user_home }}/Library/LaunchAgents/{{ hermes_agent.label }}.plist
+  register: hermes_bootstrap
+  until: hermes_bootstrap.rc == 0
+  retries: 5
+  delay: 3
+  changed_when: hermes_bootstrap.rc == 0
+  when: hermes_needs_bootstrap

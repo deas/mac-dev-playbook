@@ -1,6 +1,8 @@
 ---
-# Hermes gateway as a user-scoped LaunchAgent, replacing the Docker container that
-# used to run it inside the Colima VM.
+# Hermes as user-scoped LaunchAgents, replacing the Docker container that used to
+# run it inside the Colima VM: the gateway (F-02) and the web dashboard (F-03).
+# They are two processes, not two modes -- `gateway run` never serves the dashboard;
+# in the container image they were separate s6 services.
 #
 # The gateway is deliberately NOT registered under hermes' own `ai.hermes.gateway`
 # label: hermes rewrites and boots out that label itself (upstream #43842, #69098),
@@ -9,7 +11,7 @@
 # foreground so it is the supervisor -- never `hermes gateway start`, which degrades
 # to an unsupervised detached process on launchctl exit 5 (#11323, #42524).
 
-- name: Configure the Hermes gateway host service
+- name: Configure the Hermes host services
   become: true
   become_user: "{{ hermes_target_user }}"
   environment:
@@ -52,54 +54,27 @@
         state: directory
         mode: "0755"
 
-    - name: Render the Hermes gateway LaunchAgent plist
-      ansible.builtin.template:
-        src: hermes-gateway.plist.j2
-        dest: "{{ hermes_target_user_home }}/Library/LaunchAgents/{{ hermes_launchd_label }}.plist"
-        mode: "0644"
-      register: hermes_agent_plist
-
-    - name: Probe whether the Hermes gateway LaunchAgent is already loaded
-      ansible.builtin.command: >-
-        launchctl print gui/{{ hermes_uid.stdout }}/{{ hermes_launchd_label }}
-      register: hermes_agent_print
-      changed_when: false
-      failed_when: false
-      check_mode: false
-
-    - name: Decide whether the Hermes gateway LaunchAgent needs reloading
-      ansible.builtin.set_fact:
-        hermes_needs_bootout: "{{ hermes_agent_print.rc == 0 and hermes_agent_plist.changed }}"
-        hermes_needs_bootstrap: "{{ hermes_agent_print.rc != 0 or hermes_agent_plist.changed }}"
-
-    - name: Bootout the Hermes gateway LaunchAgent when the plist changed
-      ansible.builtin.command: >-
-        launchctl bootout gui/{{ hermes_uid.stdout }}/{{ hermes_launchd_label }}
-      changed_when: true
-      when: hermes_needs_bootout
-
-    # launchd tears the job down asynchronously. Bootstrapping while the label is
-    # still leaving the domain returns "Bootstrap failed: 5: Input/output error"
-    # -- the same exit 5 hermes itself treats as "launchd unsupported" before
-    # silently detaching (upstream #11323, #42524). Wait it out instead.
-    - name: Wait for the Hermes gateway label to leave the GUI domain
-      ansible.builtin.command: >-
-        launchctl print gui/{{ hermes_uid.stdout }}/{{ hermes_launchd_label }}
-      register: hermes_bootout_wait
-      until: hermes_bootout_wait.rc != 0
-      retries: 10
-      delay: 2
-      changed_when: false
-      failed_when: false
-      when: hermes_needs_bootout
-
-    - name: Bootstrap the Hermes gateway LaunchAgent into the user's GUI domain
-      ansible.builtin.command: >-
-        launchctl bootstrap gui/{{ hermes_uid.stdout }}
-        {{ hermes_target_user_home }}/Library/LaunchAgents/{{ hermes_launchd_label }}.plist
-      register: hermes_bootstrap
-      until: hermes_bootstrap.rc == 0
-      retries: 5
-      delay: 3
-      changed_when: hermes_bootstrap.rc == 0
-      when: hermes_needs_bootstrap
+    - name: Converge the Hermes LaunchAgents
+      ansible.builtin.include_tasks: hermes-launchagent.yml
+      loop: "{{ hermes_launchagents }}"
+      loop_control:
+        loop_var: hermes_agent
+        label: "{{ hermes_agent.label }}"
+      vars:
+        hermes_launchagents: >-
+          {{
+            [
+              {
+                'label': hermes_launchd_label,
+                'template': 'hermes-gateway.plist.j2'
+              }
+            ]
+            + (
+              [
+                {
+                  'label': hermes_dashboard_launchd_label,
+                  'template': 'hermes-dashboard.plist.j2'
+                }
+              ] if hermes_dashboard_enabled else []
+            )
+          }}

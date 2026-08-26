@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ hermes_dashboard_launchd_label }}</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>{{ hermes_target_user_home }}</string>
+        <key>PATH</key>
+        <string>{{ hermes_target_user_home }}/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+{% for key, value in hermes_environment | dictsort %}
+        <key>{{ key }}</key>
+        <string>{{ value }}</string>
+{%- endfor %}
+    </dict>
+    <!-- `dashboard` runs uvicorn in the foreground (hermes_cli/main.py cmd_dashboard
+         -> web_server.start_server), so launchd supervises the real process. The one
+         re-exec on that path is os.execvpe, which keeps the pid; it only fires for a
+         named profile, and this host runs the default one.
+         --skip-build: the prebuilt SPA ships at hermes_cli/web_dist, so nothing here
+         needs npm at launch time. --no-open: launchd has no browser to open. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ hermes_bin }}</string>
+        <string>dashboard</string>
+        <string>--host</string>
+        <string>{{ hermes_dashboard_host }}</string>
+        <string>--port</string>
+        <string>{{ hermes_dashboard_port }}</string>
+        <string>--skip-build</string>
+        <string>--no-open</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>{{ hermes_home }}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- Plain true, for the same reason as the gateway (upstream #28135). Note the
+         dashboard also exits non-zero when {{ hermes_dashboard_port }} is already
+         taken; ThrottleInterval bounds that into a slow retry rather than a spin,
+         and this agent is meant to own the port before the desktop app spawns its
+         own backend. -->
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>StandardOutPath</key>
+    <string>{{ hermes_log_dir }}/dashboard.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{ hermes_log_dir }}/dashboard.error.log</string>
+</dict>
+</plist>

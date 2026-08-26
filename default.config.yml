@@ -106,8 +106,10 @@ colima_supervisor_path: "{{ colima_target_user_home }}/.colima/colima-supervisor
 hermes_enabled: true
 hermes_target_user: apfelmus
 hermes_target_user_home: "/Users/{{ hermes_target_user }}"
-# Kept from the container deployment so no state migration is needed.
-hermes_home: "{{ hermes_target_user_home }}/hermes-docker-daten"
+# Kept from the container deployment so no state migration is needed. The directory
+# was renamed hermes-docker-daten -> hermes-daten on the host on 2026-08-26 (the old
+# tree is archived as hermes-docker-daten-260617.tar.gz); this var follows it.
+hermes_home: "{{ hermes_target_user_home }}/hermes-daten"
 hermes_bin: "{{ hermes_target_user_home }}/.local/bin/hermes"
 # Deliberately not ai.hermes.gateway -- hermes rewrites and boots out that label itself.
 hermes_launchd_label: de.contentreich.hermes-gateway
@@ -116,10 +118,9 @@ hermes_log_dir: "{{ hermes_home }}/logs"
 # in {{ hermes_home }}/.env, which hermes reads and rewrites itself.
 # API_SERVER_HOST only defaulted to 0.0.0.0 inside the container; natively it
 # defaults to loopback, so it is set explicitly here.
-# The dashboard is deliberately not run: it is an optional management UI that
-# nothing else depends on, and it needs its own process (`hermes dashboard`) --
-# `gateway run` never started it. The container's HERMES_DASHBOARD* keys are
-# therefore dropped rather than carried over.
+# The dashboard runs as its own LaunchAgent (see hermes_dashboard_* below), not from
+# these keys: `gateway run` never starts it, and the container's HERMES_DASHBOARD*
+# env keys drove an s6 service that has no native equivalent.
 hermes_environment:
   HERMES_HOME: "{{ hermes_home }}"
   API_SERVER_HOST: "0.0.0.0"
@@ -134,6 +135,18 @@ hermes_environment:
   EMAIL_SMTP_PORT: "587"
   TERMINAL_LIFETIME_SECONDS: "300"
   TERMINAL_TIMEOUT: "60"
+
+# Hermes dashboard (F-03). A second process, not a mode of the gateway; the Hermes
+# desktop app expects the machine dashboard on 9119.
+hermes_dashboard_enabled: true
+hermes_dashboard_launchd_label: de.contentreich.hermes-dashboard
+# Loopback only. Since the June 2026 hardening a non-loopback bind ALWAYS requires a
+# registered auth provider -- `--insecure` no longer waives it -- and the dashboard's
+# interactive auth setup is TTY-only, so under launchd a public bind is a SystemExit
+# on every launch, not a prompt. The desktop app runs on this host, so loopback
+# reaches it. Exposing this remotely means registering an auth provider first.
+hermes_dashboard_host: "127.0.0.1"
+hermes_dashboard_port: "9119"
 
 homebrew_taps: []
 

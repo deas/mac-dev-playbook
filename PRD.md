@@ -9,6 +9,7 @@ LLM-based services, driven by Ansible + Homebrew.
 | ------ | ------------------------------------------------ | ------ |
 | F-01   | Colima VM resilience (self-healing LaunchDaemon) | ✅     |
 | F-02   | Hermes gateway as a user-scoped host service     | ✅     |
+| F-03   | Hermes dashboard as a user-scoped host service   | ✅     |
 
 ---
 
@@ -109,7 +110,10 @@ setting means unrestricted shell as `apfelmus` — home directory, `~/.ssh`, the
 machine itself. This is a deliberate choice, not an oversight; Colima remains
 available should the `docker` terminal backend be wanted later.
 
-**The dashboard is dropped.** The container published 9119, but the dashboard was
+**The dashboard is dropped.** *(Superseded by [F-03] on 2026-08-26 — the Hermes
+desktop app turned out to require it. The analysis below stands as written except
+for its conclusion; F-03 records what actually changed.)* The container published
+9119, but the dashboard was
 a separate s6-supervised process inside the image — `gateway run` never started
 it, and natively it needs its own `hermes dashboard` process. Upstream describes
 it as an optional machine-level management surface; it consumes the gateway's
@@ -137,7 +141,8 @@ reports "colima is not running" even when the VM is healthy
   `~/.hermes`.
 - **R3 — Parity of exposure:** the API server remains reachable on all interfaces
   on 8642, as the published container port was. The dashboard (9119) is dropped —
-  see Background.
+  see Background. **Superseded by [F-03]:** the dashboard is back, on loopback
+  rather than at container parity.
 - **R4 — Launchd owns supervision:** a crashed gateway is relaunched by launchd
   regardless of exit status, without tight-looping, and never silently downgraded
   to an unsupervised background process.
@@ -201,3 +206,108 @@ LaunchDaemon with `UserName: apfelmus`, mirroring `com.colima.<user>`.
   `runs`.
 - No `hermes-agent` container remains, and the only listener on 8642 is the hermes
   process itself, not the colima ssh port-forward.
+
+---
+
+## [F-03] Hermes Dashboard as a User-Scoped Host Service
+
+**Goal:** The Hermes web dashboard must run natively on the host as its own
+launchd LaunchAgent owned by `{{ hermes_target_user }}`, provisioned by Ansible,
+serving port `{{ hermes_dashboard_port }}` so the Hermes desktop app can reach it.
+
+### Background
+
+F-02 dropped the dashboard, on the reasoning that nothing consumed it. That was
+wrong: the Hermes desktop app requires the dashboard endpoint on 9119. Without a
+machine-level server on that port the app falls back to spawning its own backend
+(`hermes serve --host 127.0.0.1 --port 0`), which is per-app, ephemeral, and not
+the machine management surface.
+
+The dashboard is a **separate process**, not a gateway mode — `gateway run` never
+serves it, and in the container image the two were separate s6 services. So this
+is a second LaunchAgent alongside F-02's, not a change to it.
+
+**It binds loopback, not all interfaces — this is not container parity.** The
+container published 9119 with `HERMES_DASHBOARD_INSECURE=1`. That flag is a
+documented no-op since the June 2026 hardening: `web_server.start_server` raises
+`SystemExit` on any non-loopback bind with no registered auth provider, and the
+interactive fallback (`_maybe_setup_dashboard_auth_interactively`) only prompts on
+a TTY. Under launchd there is no TTY, so a public bind would be a hard exit on
+every launch — with `KeepAlive` a crash loop, not a warning. Loopback engages no
+auth gate, and the desktop app runs on this host as `{{ hermes_target_user }}`, so
+loopback reaches it. Exposing 9119 beyond the host means registering an auth
+provider (password or OAuth via `hermes dashboard register`) first.
+
+**No npm build is needed.** F-02 recorded that re-adding the dashboard would cost
+"a one-time `npm run build` in `web/`". That is stale as of v0.20.5: a prebuilt SPA
+ships at `hermes_cli/web_dist/`, and `--skip-build` serves it directly. The
+LaunchAgent therefore has no node/npm dependency at launch time.
+
+**`hermes_home` had drifted.** The data directory was renamed on the host
+(`hermes-docker-daten` → `hermes-daten`, the old tree archived as
+`hermes-docker-daten-260617.tar.gz`) and the running gateway's plist hand-edited to
+match, but `default.config.yml` and the `justfile` still named the old path. A
+provisioning run would have repointed the gateway at a nonexistent `HERMES_HOME`
+and bounced it. Corrected here, since the dashboard reads the same var.
+
+### Requirements
+
+- **R1 — Native host service:** the dashboard runs as a LaunchAgent under
+  `{{ hermes_target_user }}`, started by launchd at load, independent of the
+  gateway agent and of Colima/Docker.
+- **R2 — Shared state:** it serves the same `HERMES_HOME` as the gateway
+  (`{{ hermes_home }}`), so both surfaces see one profile and one config.
+- **R3 — Reachable by the desktop app:** it listens on
+  `{{ hermes_dashboard_host }}:{{ hermes_dashboard_port }}`, and does not engage
+  the auth gate that a non-loopback bind would fail closed on.
+- **R4 — Launchd owns supervision:** launchd supervises the real uvicorn process,
+  relaunches it regardless of exit status, and is never downgraded to an
+  unsupervised background process.
+- **R5 — No build at launch:** startup must not depend on npm or a network fetch.
+- **R6 — Idempotent provisioning:** re-running the playbook converges and
+  re-bootstraps the agent only when its plist changes — and must not bounce the
+  F-02 gateway as a side effect.
+- **R7 — Boot autostart:** same auto-login dependency as F-02 R7. Enabling
+  FileVault or clearing auto-login breaks both agents identically.
+
+### Technical Spec
+
+- `templates/hermes-dashboard.plist.j2` — `ProgramArguments` invokes
+  `{{ hermes_bin }} dashboard --host … --port … --skip-build --no-open`.
+  `cmd_dashboard` ends in `web_server.start_server`, which runs uvicorn in the
+  foreground, so the launchd pid is the server; the one re-exec on that path is
+  `os.execvpe` (same pid) and fires only for a named profile, not the default one
+  this host runs. `--no-open` because launchd has no browser. `KeepAlive=true` as a
+  plain boolean and `ThrottleInterval=30`, for F-02's reasons — the throttle also
+  bounds the port-in-use exit into a slow retry rather than a spin.
+  `EnvironmentVariables` reuses `{{ hermes_environment }}` so both agents share one
+  source of truth. (R1, R3, R4, R5)
+- `tasks/hermes-launchagent.yml` — the render / probe / bootout / wait-for-release /
+  bootstrap sequence F-02 hardened, extracted so both agents share it verbatim
+  rather than diverging. Parameterized by `hermes_agent.label` and
+  `hermes_agent.template`. (R6)
+- `tasks/hermes.yml` — one-time setup (install, log dir, retiring
+  `ai.hermes.gateway`) stays inline; the per-agent work becomes an `include_tasks`
+  loop over the gateway plus, when `hermes_dashboard_enabled`, the dashboard. (R1, R6)
+- `default.config.yml` — `hermes_dashboard_*` vars; `hermes_home` corrected to
+  `hermes-daten`. (R2, R3)
+- `justfile` — `hermes_home` corrected; `hermes-status` reports both labels;
+  `hermes-dashboard-restart` added; `hermes-update` boots **both** agents out before
+  updating. The dashboard has to come down too: `hermes update` runs
+  `_kill_stale_dashboard_processes` to stop a new JS bundle talking to an old
+  in-memory backend, and under `KeepAlive` that kill is just a respawn onto
+  half-updated files.
+
+### Acceptance Criteria
+
+- `launchctl print gui/<uid>/de.contentreich.hermes-dashboard` reports
+  `state = running` with a live pid.
+- `curl -sS http://127.0.0.1:9119/` returns the dashboard SPA, and the listener on
+  9119 is that pid.
+- The dashboard process has `{{ hermes_home }}` open, not `~/.hermes`.
+- `kill -9` on it is followed by a launchd relaunch, `runs` incrementing by one.
+- Startup touches no npm: `dashboard.log` shows the `--skip-build` line naming
+  `hermes_cli/web_dist`, and no build output.
+- A second `ansible-playbook main.yml --tags hermes` reports `changed=0 failed=0`.
+- The F-02 gateway is undisturbed: same pid and `runs` as before the run, still
+  listening on 8642.
