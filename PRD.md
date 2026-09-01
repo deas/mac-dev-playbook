@@ -104,6 +104,28 @@ unloaded (#43842, #69098). And `hermes gateway start` treats `launchctl bootstra
 exit 5 as "launchd unsupported" and degrades to an unsupervised detached process
 while still reporting the service as loaded (#11323, #42524).
 
+**A private label is not enough (2026-09-01).** Keeping the gateway outside hermes'
+namespace kept hermes' *management* off it, and simultaneously removed its
+*protection*. The Hermes desktop app starts a second backend, which calls
+`_reap_unsupervised_gateway_orphans()`: every `gateway run` process reparented to
+launchd is an orphan unless its PID appears in `_get_service_pids(all_profiles=True)`,
+and the launchd branch of that set only ever collects labels beginning with
+`ai.hermes.gateway`. Under `de.contentreich.hermes-gateway` the production gateway was
+therefore SIGTERM'd every 15–40 minutes whenever the app ran — 311 shutdowns between
+2026-08-25 (the container cutover, which first put both on one filesystem) and
+2026-08-31. `KeepAlive` masked it: each restart took 0.3 s, but `restart_drain_timeout:
+60` means any autonomous run longer than a minute was cut off. See
+`hermes-app-problem.md`.
+
+The resolution is a label carrying the protected prefix with a suffix hermes can never
+derive: `ai.hermes.gateway-de.contentreich`. Protection comes from a `launchctl list`
+prefix scan (over-inclusive by design and used only to exclude PIDs from the kill
+sweep); management comes from `launchd_gateway_labels_for_install()`, which derives
+labels from installed profiles and skips any name outside
+`^[a-z0-9][a-z0-9_-]{0,63}$` — a dot in the suffix puts this label permanently out of
+its reach. Both properties therefore hold at once, and everything in the paragraph
+above still applies.
+
 **Accepted trade-off:** inside the container, `terminal.backend: local` meant the
 agent's shell commands were confined to the container. On the host the same
 setting means unrestricted shell as `apfelmus` — home directory, `~/.ssh`, the
@@ -147,7 +169,11 @@ reports "colima is not running" even when the VM is healthy
   regardless of exit status, without tight-looping, and never silently downgraded
   to an unsupervised background process.
 - **R5 — Exactly one gateway:** no second LaunchAgent may target the same
-  `HERMES_HOME`; provisioning retires any hermes-managed agent it finds.
+  `HERMES_HOME`; provisioning retires any hermes-managed agent it finds, and any
+  label this feature itself used previously.
+- **R8 — Survives the desktop app:** with the Hermes desktop app running, the
+  gateway is not terminated by hermes' own orphan reaper — `runs` stays flat and
+  no in-flight agent run is cut off.
 - **R6 — Idempotent provisioning:** re-running the playbook converges and
   re-bootstraps the agent only when the plist changes.
 - **R7 — Boot autostart:** the gateway returns after an unattended reboot, with
@@ -173,23 +199,36 @@ LaunchDaemon with `UserName: apfelmus`, mirroring `com.colima.<user>`.
   `ThrottleInterval=30` bounds restart rate. `EnvironmentVariables` carries `HOME`,
   a `PATH` led by `~/.local/bin`, and `{{ hermes_environment }}`. (R1, R3, R4)
 - `default.config.yml` — `hermes_*` vars. `hermes_launchd_label` is
-  `de.contentreich.hermes-gateway`, deliberately not `ai.hermes.gateway`, so
-  hermes' own plist-refresh path has nothing to claim. `hermes_environment` sets
+  `ai.hermes.gateway-de.contentreich`: the `ai.hermes.gateway*` prefix the orphan
+  reaper protects, with a dotted suffix no profile name can produce, so hermes' own
+  plist-refresh and update paths still have nothing to claim (R8, and see
+  Background). `hermes_retired_launchd_labels` lists the agents provisioning boots
+  out and deletes — `ai.hermes.gateway` and the pre-rename
+  `de.contentreich.hermes-gateway` (R5). `hermes_environment` sets
   `API_SERVER_HOST` and `HERMES_DASHBOARD_HOST` to `0.0.0.0` explicitly: both
   default to loopback natively and only defaulted to all-interfaces inside the
   container. Container-only keys (`HERMES_UID`, `HERMES_GID`) are dropped. (R2, R3)
 - `tasks/hermes.yml` — installs Hermes via the official `install.sh` guarded by
   `creates: {{ hermes_bin }}`; never calls `hermes gateway install` or
-  `hermes setup`. Boots out and deletes any `ai.hermes.gateway.plist`, mirroring
-  how `tasks/colima.yml` retires the brew-services agent. Renders the plist, then
+  `hermes setup`. Boots out and deletes every `hermes_retired_launchd_labels` plist
+  before the converge — a retired agent still holds 8642 — mirroring how
+  `tasks/colima.yml` retires the brew-services agent. Renders the plist, then
   probes / boots out / bootstraps against `gui/<uid>` gated on
   `hermes_agent_plist.changed`. (R1, R5, R6)
 
 ### Acceptance Criteria
 
-- `launchctl print gui/<uid>/de.contentreich.hermes-gateway` reports
+- `launchctl print gui/<uid>/ai.hermes.gateway-de.contentreich` reports
   `state = running` with a live pid — not the detached fallback that
   `hermes gateway status` would still call "loaded".
+- With the desktop app running, the gateway survives past 71 minutes — the longest
+  gap observed under the old label — with `runs` unchanged and no `SIGTERM` in
+  `gateway.log`. (R8)
+- Run in the target user's Aqua session — the desktop backend's own context, with
+  its own `HERMES_HOME` (`~/.hermes`) — `_get_service_pids(all_profiles=True)`
+  contains the gateway's pid and `find_gateway_pids(exclude_pids=…)` is empty. This
+  is the reaper's own arithmetic and settles R8 directly; the runtime observation
+  above is the field confirmation, not the test.
 - The API server answers on a non-loopback address, not just `127.0.0.1`, and
   rejects an unauthenticated request with 401.
 - The running gateway has `{{ hermes_home }}` open, not `~/.hermes`.

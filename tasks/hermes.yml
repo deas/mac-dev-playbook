@@ -7,9 +7,11 @@
 # The gateway is deliberately NOT registered under hermes' own `ai.hermes.gateway`
 # label: hermes rewrites and boots out that label itself (upstream #43842, #69098),
 # and `hermes gateway install` resets HERMES_HOME back to ~/.hermes (#32741), which
-# on this host is a different state tree. launchd runs `gateway run` in the
-# foreground so it is the supervisor -- never `hermes gateway start`, which degrades
-# to an unsupervised detached process on launchctl exit 5 (#11323, #42524).
+# on this host is a different state tree. It does carry the `ai.hermes.gateway*`
+# prefix -- see hermes_launchd_label for why that is what keeps the desktop app's
+# orphan reaper off it. launchd runs `gateway run` in the foreground so it is the
+# supervisor -- never `hermes gateway start`, which degrades to an unsupervised
+# detached process on launchctl exit 5 (#11323, #42524).
 
 - name: Configure the Hermes host services
   become: true
@@ -36,17 +38,21 @@
         state: directory
         mode: "0700"
 
-    - name: Bootout the hermes-managed LaunchAgent if it is loaded
+    # Before the converge below, not after: a retired agent still holds 8642, so a
+    # renamed gateway could not bind while its predecessor is loaded.
+    - name: Bootout retired gateway LaunchAgents if they are loaded
       ansible.builtin.command: >-
-        launchctl bootout gui/{{ hermes_uid.stdout }}/ai.hermes.gateway
-      register: hermes_own_agent_bootout
+        launchctl bootout gui/{{ hermes_uid.stdout }}/{{ item }}
+      register: hermes_retired_bootout
       failed_when: false
-      changed_when: hermes_own_agent_bootout.rc == 0
+      changed_when: hermes_retired_bootout.rc == 0
+      loop: "{{ hermes_retired_launchd_labels }}"
 
-    - name: Remove the hermes-managed LaunchAgent plist if present
+    - name: Remove retired gateway LaunchAgent plists if present
       ansible.builtin.file:
-        path: "{{ hermes_target_user_home }}/Library/LaunchAgents/ai.hermes.gateway.plist"
+        path: "{{ hermes_target_user_home }}/Library/LaunchAgents/{{ item }}.plist"
         state: absent
+      loop: "{{ hermes_retired_launchd_labels }}"
 
     - name: Ensure the LaunchAgents directory exists
       ansible.builtin.file:

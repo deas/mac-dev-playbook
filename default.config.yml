@@ -111,8 +111,20 @@ hermes_target_user_home: "/Users/{{ hermes_target_user }}"
 # tree is archived as hermes-docker-daten-260617.tar.gz); this var follows it.
 hermes_home: "{{ hermes_target_user_home }}/hermes-daten"
 hermes_bin: "{{ hermes_target_user_home }}/.local/bin/hermes"
-# Deliberately not ai.hermes.gateway -- hermes rewrites and boots out that label itself.
-hermes_launchd_label: de.contentreich.hermes-gateway
+# Carries hermes' own ai.hermes.gateway* prefix, with a suffix no hermes profile can
+# produce -- the dot is outside hermes' profile-name regex. The orphan reaper in the
+# desktop app's backend protects every launchd label with that prefix (a `launchctl
+# list` scan in _get_service_pids), while hermes' own restart/update/install paths act
+# only on labels derived from installed profiles (launchd_gateway_labels_for_install),
+# which can never yield this one. Protected, but not hermes-managed.
+# Until 2026-09-01 this was de.contentreich.hermes-gateway; the reaper then read it as
+# an unsupervised orphan and SIGTERM'd it every 15-40 min (see hermes-app-problem.md).
+hermes_launchd_label: ai.hermes.gateway-de.contentreich
+# Gateway agents provisioning retires on sight (F-02 R5): hermes' own, and the label
+# this host used before the rename above.
+hermes_retired_launchd_labels:
+  - ai.hermes.gateway
+  - de.contentreich.hermes-gateway
 hermes_log_dir: "{{ hermes_home }}/logs"
 # Non-secret runtime config, carried over from the container's app.env. Secrets stay
 # in {{ hermes_home }}/.env, which hermes reads and rewrites itself.

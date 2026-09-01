@@ -5,7 +5,7 @@
 hermes_user := "apfelmus"
 hermes_home := "/Users/apfelmus/hermes-daten"
 hermes_bin := "/Users/apfelmus/.local/bin/hermes"
-hermes_label := "de.contentreich.hermes-gateway"
+hermes_label := "ai.hermes.gateway-de.contentreich"
 hermes_dashboard_label := "de.contentreich.hermes-dashboard"
 
 # List the available recipes.
@@ -40,7 +40,8 @@ hermes-update *ARGS:
     set -euo pipefail
 
     # launchctl, not `hermes gateway stop/start/restart`: those act on hermes' own
-    # ai.hermes.gateway label, which tasks/hermes.yml deliberately removes. With
+    # ai.hermes.gateway label, which tasks/hermes.yml deliberately removes -- the
+    # label above only shares its prefix, and hermes derives no label from it. With
     # that plist gone they fall through to a SIGTERM on the pid and KeepAlive
     # respawns the job -- a bounce, not a stop. `hermes update` skips its own
     # service restart for the same reason (hermes_cli/update_cmd.py gates it on

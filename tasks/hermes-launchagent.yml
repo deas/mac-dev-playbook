@@ -43,7 +43,10 @@
   delay: 2
   changed_when: false
   failed_when: false
-  when: hermes_needs_bootout
+  # Not in check mode: the bootout above never ran there, so the label is still
+  # loaded, `until` can never be satisfied, and retry exhaustion fails the run --
+  # which would make `make ansible-playbook-check` unusable for any plist change.
+  when: hermes_needs_bootout and not ansible_check_mode
 
 - name: Bootstrap into the user's GUI domain {{ hermes_agent.label }}
   ansible.builtin.command: >-
